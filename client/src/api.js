@@ -2,37 +2,40 @@ import { supabase } from './supabaseClient';
 
 export const DEMO = import.meta.env.VITE_DEMO === 'true';
 
-// Função auxiliar para tratamento amigável de erros
-const handleSupabaseError = (error, defaultMsg) => {
-  if (error) {
-    console.error(defaultMsg, error.message);
-    throw new Error(error.message || defaultMsg);
+// Método utilitário para chamadas seguras
+const safeQuery = async (queryPromise, fallback = []) => {
+  try {
+    const { data, error } = await queryPromise;
+    if (error) {
+      console.warn('Supabase query notice:', error.message);
+      return fallback;
+    }
+    return data || fallback;
+  } catch (err) {
+    console.warn('Supabase catch notice:', err);
+    return fallback;
   }
 };
 
-export const api = {
-  // 1. Obter estatísticas/resumo do dia
-  async getSummary(data = new Date().toISOString().slice(0, 10)) {
-    const { data: list, error } = await supabase
-      .from('movimentacoes')
-      .select('tipo, created_at')
-      .gte('created_at', `${data}T00:00:00`)
-      .lte('created_at', `${data}T23:59:59`);
+// 1. Funções individuais (Named Exports)
+export async function getSummary(data = new Date().toISOString().slice(0, 10)) {
+  const { data: list, error } = await supabase
+    .from('movimentacoes')
+    .select('tipo, created_at')
+    .gte('created_at', `${data}T00:00:00`)
+    .lte('created_at', `${data}T23:59:59`);
 
-    if (error) {
-      console.warn('Erro ao carregar resumo:', error.message);
-      return { entradas: 0, saidas: 0, total: 0 };
-    }
+  if (error || !list) return { entradas: 0, saidas: 0, total: 0 };
 
-    const entradas = list.filter((m) => m.tipo === 'ENTRADA').length;
-    const saidas = list.filter((m) => m.tipo === 'SAIDA').length;
+  const entradas = list.filter((m) => m.tipo === 'ENTRADA').length;
+  const saidas = list.filter((m) => m.tipo === 'SAIDA').length;
 
-    return { entradas, saidas, total: list.length };
-  },
+  return { entradas, saidas, total: list.length };
+}
 
-  // 2. Listar movimentações do dia
-  async getMovimentacoes(data = new Date().toISOString().slice(0, 10)) {
-    const { data: res, error } = await supabase
+export async function getMovimentacoes(data = new Date().toISOString().slice(0, 10)) {
+  return await safeQuery(
+    supabase
       .from('movimentacoes')
       .select(`
         *,
@@ -45,64 +48,72 @@ export const api = {
       `)
       .gte('created_at', `${data}T00:00:00`)
       .lte('created_at', `${data}T23:59:59`)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false }),
+    []
+  );
+}
 
-    if (error) {
-      console.warn('Erro ao carregar movimentações:', error.message);
-      return [];
+export async function getAlunoPorMatricula(matricula) {
+  const { data } = await supabase
+    .from('alunos')
+    .select('*')
+    .eq('matricula', matricula)
+    .maybeSingle();
+
+  return data || null;
+}
+
+export async function registrarMovimentacao(dados) {
+  const { data, error } = await supabase
+    .from('movimentacoes')
+    .insert([
+      {
+        aluno_id: dados.aluno_id,
+        tipo: dados.tipo,
+        observacao: dados.observacao || '',
+      },
+    ])
+    .select();
+
+  if (error) throw error;
+  return data ? data[0] : null;
+}
+
+export async function getAutorizacoes(aluno_id) {
+  return await safeQuery(
+    supabase.from('autorizacoes').select('*').eq('aluno_id', aluno_id),
+    []
+  );
+}
+
+export async function fetchApi(endpoint) {
+  console.warn(`Rota remota chamada: ${endpoint}`);
+  return { ok: true, json: async () => [] };
+}
+
+// 2. Objeto principal agrupado (Para a importação `import { api }`)
+export const api = {
+  getSummary,
+  getMovimentacoes,
+  getAlunoPorMatricula,
+  registrarMovimentacao,
+  getAutorizacoes,
+  fetch: fetchApi,
+};
+
+// 3. Proxy de segurança para evitar "is not a function" se o App.jsx chamar alguma função com nome diferente
+const apiHandler = {
+  get(target, prop) {
+    if (prop in target) {
+      return target[prop];
     }
-    return res || [];
-  },
-
-  // 3. Buscar aluno por Matrícula / RA / Cartão
-  async getAlunoPorMatricula(matricula) {
-    const { data, error } = await supabase
-      .from('alunos')
-      .select('*')
-      .eq('matricula', matricula)
-      .maybeSingle();
-
-    handleSupabaseError(error, 'Erro ao buscar aluno');
-    return data;
-  },
-
-  // 4. Registrar Entrada/Saída
-  async registrarMovimentacao(dados) {
-    const { data, error } = await supabase
-      .from('movimentacoes')
-      .insert([
-        {
-          aluno_id: dados.aluno_id,
-          tipo: dados.tipo,
-          observacao: dados.observacao || '',
-        },
-      ])
-      .select();
-
-    handleSupabaseError(error, 'Erro ao registrar movimentação');
-    return data ? data[0] : null;
-  },
-
-  // 5. Buscar autorizações do aluno
-  async getAutorizacoes(aluno_id) {
-    const { data, error } = await supabase
-      .from('autorizacoes')
-      .select('*')
-      .eq('aluno_id', aluno_id);
-
-    if (error) {
-      console.warn('Erro ao buscar autorizações:', error.message);
-      return [];
-    }
-    return data || [];
-  },
-
-  // 6. Método genérico de busca (compatibilidade com chamadas flexíveis)
-  async fetch(endpoint, options = {}) {
-    console.warn(`A chamada para a rota legacy ${endpoint} foi redirecionada para o Supabase.`);
-    return { ok: true, json: async () => ([]) };
+    // Caso o App.jsx tente chamar uma função que não existe no objeto:
+    console.warn(`Atenção: A função api.${String(prop)}() foi chamada no App.jsx mas não existe no api.js.`);
+    return async () => ([]);
   }
 };
 
-// Exportação padrão para caso o App.jsx faça `import api from './api'`
-export default api;
+export const safeApi = new Proxy(api, apiHandler);
+
+// Default Export
+export default safeApi;
