@@ -1,11 +1,8 @@
 import { supabase } from './supabaseClient';
 
-// Flag para saber se estamos rodando em modo DEMO/Fallback
 export const DEMO = import.meta.env.VITE_DEMO === 'true';
 
-// Objeto de API consumido pelo App.jsx
 export const api = {
-  // 1. Busca resumo/estatísticas do dia
   async getSummary(data = new Date().toISOString().slice(0, 10)) {
     const { data: movimentacoes, error } = await supabase
       .from('movimentacoes')
@@ -21,7 +18,6 @@ export const api = {
     return { entradas, saidas, total: movimentacoes.length };
   },
 
-  // 2. Busca lista de movimentações
   async getMovimentacoes(data = new Date().toISOString().slice(0, 10)) {
     const { data: res, error } = await supabase
       .from('movimentacoes')
@@ -42,7 +38,6 @@ export const api = {
     return res;
   },
 
-  // 3. Busca aluno por matrícula ou RA
   async getAlunoPorMatricula(matricula) {
     const { data, error } = await supabase
       .from('alunos')
@@ -54,7 +49,6 @@ export const api = {
     return data;
   },
 
-  // 4. Registra movimentação de entrada/saída
   async registrarMovimentacao(dados) {
     const { data, error } = await supabase
       .from('movimentacoes')
@@ -71,7 +65,6 @@ export const api = {
     return data[0];
   },
 
-  // 5. Busca autorizações pendentes/válidas
   async getAutorizacoes(aluno_id) {
     const { data, error } = await supabase
       .from('autorizacoes')
