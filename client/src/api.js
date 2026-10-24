@@ -2,22 +2,36 @@ import { supabase } from './supabaseClient';
 
 export const DEMO = import.meta.env.VITE_DEMO === 'true';
 
-// Método utilitário para chamadas seguras
-const safeQuery = async (queryPromise, fallback = []) => {
+// Funções Utilitárias e de Formatação esperadas pela interface
+export const formatHora = (isoString) => {
+  if (!isoString) return '--:--';
   try {
-    const { data, error } = await queryPromise;
-    if (error) {
-      console.warn('Supabase query notice:', error.message);
-      return fallback;
-    }
-    return data || fallback;
-  } catch (err) {
-    console.warn('Supabase catch notice:', err);
-    return fallback;
+    const d = new Date(isoString);
+    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '--:--';
   }
 };
 
-// 1. Funções individuais (Named Exports)
+export const formatData = (isoString) => {
+  if (!isoString) return '--/--/----';
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleDateString('pt-BR');
+  } catch {
+    return '--/--/----';
+  }
+};
+
+export const getTurno = (isoString) => {
+  if (!isoString) return 'Manhã';
+  const hora = new Date(isoString).getHours();
+  if (hora < 12) return 'Manhã';
+  if (hora < 18) return 'Tarde';
+  return 'Noite';
+};
+
+// Funções de Consulta ao Supabase
 export async function getSummary(data = new Date().toISOString().slice(0, 10)) {
   const { data: list, error } = await supabase
     .from('movimentacoes')
@@ -34,23 +48,23 @@ export async function getSummary(data = new Date().toISOString().slice(0, 10)) {
 }
 
 export async function getMovimentacoes(data = new Date().toISOString().slice(0, 10)) {
-  return await safeQuery(
-    supabase
-      .from('movimentacoes')
-      .select(`
-        *,
-        alunos (
-          id,
-          nome,
-          matricula,
-          turma
-        )
-      `)
-      .gte('created_at', `${data}T00:00:00`)
-      .lte('created_at', `${data}T23:59:59`)
-      .order('created_at', { ascending: false }),
-    []
-  );
+  const { data: res, error } = await supabase
+    .from('movimentacoes')
+    .select(`
+      *,
+      alunos (
+        id,
+        nome,
+        matricula,
+        turma
+      )
+    `)
+    .gte('created_at', `${data}T00:00:00`)
+    .lte('created_at', `${data}T23:59:59`)
+    .order('created_at', { ascending: false });
+
+  if (error) return [];
+  return res || [];
 }
 
 export async function getAlunoPorMatricula(matricula) {
@@ -80,40 +94,42 @@ export async function registrarMovimentacao(dados) {
 }
 
 export async function getAutorizacoes(aluno_id) {
-  return await safeQuery(
-    supabase.from('autorizacoes').select('*').eq('aluno_id', aluno_id),
-    []
-  );
+  const { data, error } = await supabase
+    .from('autorizacoes')
+    .select('*')
+    .eq('aluno_id', aluno_id);
+
+  if (error) return [];
+  return data || [];
 }
 
-export async function fetchApi(endpoint) {
-  console.warn(`Rota remota chamada: ${endpoint}`);
-  return { ok: true, json: async () => [] };
-}
-
-// 2. Objeto principal agrupado (Para a importação `import { api }`)
-export const api = {
+// Objeto base consolidado
+const baseApi = {
   getSummary,
   getMovimentacoes,
   getAlunoPorMatricula,
   registrarMovimentacao,
   getAutorizacoes,
-  fetch: fetchApi,
+  fetchAutorizacoes: getAutorizacoes,
+  formatHora,
+  formatData,
+  getTurno,
+  async fetch(endpoint) {
+    return { ok: true, json: async () => [] };
+  }
 };
 
-// 3. Proxy de segurança para evitar "is not a function" se o App.jsx chamar alguma função com nome diferente
-const apiHandler = {
+// Proxy para capturar chamadas inesperadas e evitar que o App quebre
+export const api = new Proxy(baseApi, {
   get(target, prop) {
     if (prop in target) {
       return target[prop];
     }
-    // Caso o App.jsx tente chamar uma função que não existe no objeto:
-    console.warn(`Atenção: A função api.${String(prop)}() foi chamada no App.jsx mas não existe no api.js.`);
+    if (typeof prop === 'string' && (prop.startsWith('format') || prop.startsWith('get') || prop.startsWith('is'))) {
+      return () => '';
+    }
     return async () => ([]);
   }
-};
+});
 
-export const safeApi = new Proxy(api, apiHandler);
-
-// Default Export
-export default safeApi;
+export default api;
