@@ -1,138 +1,84 @@
 import { supabase } from './supabaseClient';
 
-// ==========================================
-// SERVIÇOS DE MOVIMENTAÇÃO (ENTRADA / SAÍDA)
-// ==========================================
+// Flag para saber se estamos rodando em modo DEMO/Fallback
+export const DEMO = import.meta.env.VITE_DEMO === 'true';
 
-/**
- * Registra a entrada ou saída de um aluno.
- * @param {Object} dados - Objeto contendo { aluno_id, tipo, observacao }
- */
-export async function registrarMovimentacao({ aluno_id, tipo, observacao = '' }) {
-  const { data, error } = await supabase
-    .from('movimentacoes')
-    .insert([
-      {
-        aluno_id,
-        tipo, // 'ENTRADA' ou 'SAIDA'
-        observacao,
-        data_hora: new Date().toISOString(),
-      },
-    ])
-    .select();
+// Objeto de API consumido pelo App.jsx
+export const api = {
+  // 1. Busca resumo/estatísticas do dia
+  async getSummary(data = new Date().toISOString().slice(0, 10)) {
+    const { data: movimentacoes, error } = await supabase
+      .from('movimentacoes')
+      .select('tipo, created_at')
+      .gte('created_at', `${data}T00:00:00`)
+      .lte('created_at', `${data}T23:59:59`);
 
-  if (error) {
-    console.error('Erro ao registrar movimentação:', error.message);
-    throw error;
-  }
+    if (error) throw error;
 
-  return data[0];
-}
+    const entradas = movimentacoes.filter((m) => m.tipo === 'ENTRADA').length;
+    const saidas = movimentacoes.filter((m) => m.tipo === 'SAIDA').length;
 
-/**
- * Busca o histórico recente de movimentações com os dados do aluno e turma relacionados.
- * @param {number} limite - Quantidade máxima de registros a retornar (padrão 20)
- */
-export async function obterHistoricoRecente(limite = 20) {
-  const { data, error } = await supabase
-    .from('movimentacoes')
-    .select(`
-      id,
-      tipo,
-      observacao,
-      data_hora,
-      alunos (
-        id,
-        nome,
-        matricula,
-        turmas (
-          nome
+    return { entradas, saidas, total: movimentacoes.length };
+  },
+
+  // 2. Busca lista de movimentações
+  async getMovimentacoes(data = new Date().toISOString().slice(0, 10)) {
+    const { data: res, error } = await supabase
+      .from('movimentacoes')
+      .select(`
+        *,
+        alunos (
+          id,
+          nome,
+          matricula,
+          turma
         )
-      )
-    `)
-    .order('data_hora', { ascending: false })
-    .limit(limite);
+      `)
+      .gte('created_at', `${data}T00:00:00`)
+      .lte('created_at', `${data}T23:59:59`)
+      .order('created_at', { ascending: false });
 
-  if (error) {
-    console.error('Erro ao buscar histórico:', error.message);
-    throw error;
-  }
+    if (error) throw error;
+    return res;
+  },
 
-  return data;
-}
+  // 3. Busca aluno por matrícula ou RA
+  async getAlunoPorMatricula(matricula) {
+    const { data, error } = await supabase
+      .from('alunos')
+      .select('*')
+      .eq('matricula', matricula)
+      .single();
 
-// ==========================================
-// SERVIÇOS DE ALUNOS
-// ==========================================
+    if (error) throw error;
+    return data;
+  },
 
-/**
- * Busca um aluno específico pela matrícula ou RA.
- * @param {string} matricula
- */
-export async function buscarAlunoPorMatricula(matricula) {
-  const { data, error } = await supabase
-    .from('alunos')
-    .select(`
-      *,
-      turmas (
-        nome
-      )
-    `)
-    .eq('matricula', matricula)
-    .single();
+  // 4. Registra movimentação de entrada/saída
+  async registrarMovimentacao(dados) {
+    const { data, error } = await supabase
+      .from('movimentacoes')
+      .insert([
+        {
+          aluno_id: dados.aluno_id,
+          tipo: dados.tipo,
+          observacao: dados.observacao || '',
+        },
+      ])
+      .select();
 
-  if (error) {
-    console.error('Aluno não encontrado ou erro na busca:', error.message);
-    throw error;
-  }
+    if (error) throw error;
+    return data[0];
+  },
 
-  return data;
-}
+  // 5. Busca autorizações pendentes/válidas
+  async getAutorizacoes(aluno_id) {
+    const { data, error } = await supabase
+      .from('autorizacoes')
+      .select('*')
+      .eq('aluno_id', aluno_id);
 
-/**
- * Lista todos os alunos cadastrados.
- */
-export async function listarAlunos() {
-  const { data, error } = await supabase
-    .from('alunos')
-    .select(`
-      *,
-      turmas (
-        nome
-      )
-    `)
-    .order('nome', { ascending: true });
-
-  if (error) {
-    console.error('Erro ao listar alunos:', error.message);
-    throw error;
-  }
-
-  return data;
-}
-
-// ==========================================
-// SERVIÇOS DE AUTORIZAÇÕES
-// ==========================================
-
-/**
- * Verifica se o aluno possui alguma autorização especial para saída em um determinado horário.
- * @param {string} aluno_id
- */
-export async function verificarAutorizacaoSaida(aluno_id) {
-  const hoje = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
-
-  const { data, error } = await supabase
-    .from('autorizacoes')
-    .select('*')
-    .eq('aluno_id', aluno_id)
-    .gte('data_validade', hoje)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('Erro ao verificar autorizações:', error.message);
-    throw error;
-  }
-
-  return data;
-}
+    if (error) throw error;
+    return data;
+  },
+};
