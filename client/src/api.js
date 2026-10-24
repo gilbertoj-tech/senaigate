@@ -2,7 +2,7 @@ import { supabase } from './supabaseClient';
 
 export const DEMO = import.meta.env.VITE_DEMO === 'true';
 
-// Funções Utilitárias e de Formatação esperadas pela interface
+// 1. Funções Utilitárias e de Formatação
 export const formatHora = (isoString) => {
   if (!isoString) return '--:--';
   try {
@@ -31,7 +31,7 @@ export const getTurno = (isoString) => {
   return 'Noite';
 };
 
-// Funções de Consulta ao Supabase
+// 2. Funções de Consulta ao Supabase
 export async function getSummary(data = new Date().toISOString().slice(0, 10)) {
   const { data: list, error } = await supabase
     .from('movimentacoes')
@@ -103,7 +103,11 @@ export async function getAutorizacoes(aluno_id) {
   return data || [];
 }
 
-// Objeto base consolidado
+export async function fetchAutorizacoes(aluno_id) {
+  return getAutorizacoes(aluno_id);
+}
+
+// 3. Objeto base consolidado
 const baseApi = {
   getSummary,
   getMovimentacoes,
@@ -119,7 +123,7 @@ const baseApi = {
   }
 };
 
-// Proxy para capturar chamadas inesperadas e evitar que o App quebre
+// 4. Proxy de segurança
 export const api = new Proxy(baseApi, {
   get(target, prop) {
     if (prop in target) {
